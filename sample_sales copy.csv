@@ -1,0 +1,9 @@
+order_id,date,category,region
+1123,2025-01-01,Clothing,East,2,435.7
+1065,2025-01-02,Electronics,North,5,400.71
+1248,2025-01-02,Books,West,6,133.6
+1019,2025-01-02,Electronics,East,3,107.18
+1194,2025-01-02,Books,South,6,69.11
+1168,2025-01-03,Books,North,5,258.78
+1220,2025-01-03,Sports,West,2,439.92
+
