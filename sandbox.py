@@ -34,17 +34,13 @@ SAFE_BUILTINS = {
 }
 
 
-def _worker(code, df, return_dict):
+def _worker(code, df, queue):
     try:
         local_env = {"df": df, "pd": pd, "np": np, "px": px, "go": go}
         exec(code, {"__builtins__": SAFE_BUILTINS}, local_env)
-        return_dict["result"] = local_env.get("result")
-        return_dict["fig"] = local_env.get("fig")
-        return_dict["error"] = None
+        queue.put({"result": local_env.get("result"), "fig": local_env.get("fig"), "error": None})
     except Exception:
-        return_dict["result"] = None
-        return_dict["fig"] = None
-        return_dict["error"] = traceback.format_exc()
+        queue.put({"result": None, "fig": None, "error": traceback.format_exc()})
 
 
 def run_code_safely(code: str, df: pd.DataFrame, timeout: int = 15) -> dict:
@@ -52,14 +48,20 @@ def run_code_safely(code: str, df: pd.DataFrame, timeout: int = 15) -> dict:
         if banned in code:
             return {"result": None, "fig": None, "error": f"Blocked unsafe pattern: {banned}"}
 
-    manager = multiprocessing.Manager()
-    return_dict = manager.dict()
-    p = multiprocessing.Process(target=_worker, args=(code, df, return_dict))
+    queue = multiprocessing.Queue()
+    p = multiprocessing.Process(target=_worker, args=(code, df, queue))
     p.start()
     p.join(timeout)
 
     if p.is_alive():
         p.terminate()
+        p.join()
         return {"result": None, "fig": None, "error": f"Execution timed out after {timeout}s"}
 
-    return dict(return_dict)
+    if p.exitcode != 0:
+        return {"result": None, "fig": None, "error": f"Sandbox process exited unexpectedly (code {p.exitcode})"}
+
+    if queue.empty():
+        return {"result": None, "fig": None, "error": "Sandbox produced no output"}
+
+    return queue.get_nowait()
