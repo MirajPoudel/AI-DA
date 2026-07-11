@@ -6,6 +6,10 @@ load_dotenv()
 from utils import load_dataset
 from graph import build_graph
 from pdf_export import generate_pdf
+from sessions import (
+    list_sessions, save_session, load_session,
+    delete_session, new_session_id, make_title,
+)
 
 st.set_page_config(page_title="AI Data Analyst", layout="wide")
 st.title("🧠 AI Data Analyst")
@@ -19,10 +23,15 @@ if "history" not in st.session_state:
     st.session_state.history = []
 if "llm" not in st.session_state:
     st.session_state.llm = None
+if "session_id" not in st.session_state:
+    st.session_state.session_id = new_session_id()
+if "session_title" not in st.session_state:
+    st.session_state.session_title = None
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    # ── AI Provider config ────────────────────────────────────────────────────
+
+    # ── AI Provider ───────────────────────────────────────────────────────────
     st.header("🔑 AI Provider")
 
     provider = st.selectbox(
@@ -58,7 +67,9 @@ with st.sidebar:
                     llm = ChatOpenAI(model=model, temperature=0,
                                     api_key=api_key.strip())
                 st.session_state.llm = llm
-                st.session_state.history = []   # reset chat on key change
+                st.session_state.history = []
+                st.session_state.session_id = new_session_id()
+                st.session_state.session_title = None
                 st.session_state.pdf_bytes = None
                 st.success(f"Connected to {provider}!")
             except Exception as e:
@@ -70,7 +81,7 @@ with st.sidebar:
     st.divider()
 
     # ── Dataset upload ────────────────────────────────────────────────────────
-    st.header("Dataset")
+    st.header("📂 Dataset")
     uploaded = st.file_uploader(
         "Upload CSV / Excel / JSON / SQLite (.db)",
         type=["csv", "xlsx", "xls", "json", "db"],
@@ -82,6 +93,42 @@ with st.sidebar:
     if st.session_state.df is not None:
         st.write(f"Rows: {st.session_state.df.shape[0]}, "
                  f"Cols: {st.session_state.df.shape[1]}")
+
+    st.divider()
+
+    # ── Chat history ──────────────────────────────────────────────────────────
+    st.header("💬 Chat History")
+
+    if st.button("➕ New Chat", use_container_width=True):
+        st.session_state.history = []
+        st.session_state.session_id = new_session_id()
+        st.session_state.session_title = None
+        st.session_state.pdf_bytes = None
+        st.rerun()
+
+    sessions = list_sessions()
+    if sessions:
+        for s in sessions:
+            col_btn, col_del = st.columns([5, 1])
+            is_active = s["id"] == st.session_state.session_id
+            label = ("▶ " if is_active else "") + s["title"]
+            with col_btn:
+                if st.button(label, key=f"sess_{s['id']}", use_container_width=True):
+                    st.session_state.history = load_session(s["id"])
+                    st.session_state.session_id = s["id"]
+                    st.session_state.session_title = s["title"]
+                    st.session_state.pdf_bytes = None
+                    st.rerun()
+            with col_del:
+                if st.button("🗑", key=f"del_{s['id']}"):
+                    delete_session(s["id"])
+                    if s["id"] == st.session_state.session_id:
+                        st.session_state.history = []
+                        st.session_state.session_id = new_session_id()
+                        st.session_state.session_title = None
+                    st.rerun()
+    else:
+        st.caption("No saved chats yet.")
 
 # ── Main area ─────────────────────────────────────────────────────────────────
 if st.session_state.llm is None:
@@ -129,11 +176,23 @@ else:
                 "user_query": query,
                 "llm": st.session_state.llm,
             })
-        st.session_state.history.append({
-            "query": query,
+
+        entry = {
+            "query":   query,
             "insight": result_state["insight"],
-            "result": result_state["result"],
-            "fig": result_state["fig"],
-            "code": result_state["code"],
-        })
+            "result":  result_state["result"],
+            "fig":     result_state["fig"],
+            "code":    result_state["code"],
+        }
+        st.session_state.history.append(entry)
+
+        # Auto-title from first question, then save
+        if st.session_state.session_title is None:
+            st.session_state.session_title = make_title(query)
+
+        save_session(
+            st.session_state.session_id,
+            st.session_state.session_title,
+            st.session_state.history,
+        )
         st.rerun()
