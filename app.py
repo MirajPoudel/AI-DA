@@ -48,8 +48,6 @@ else:
                 st.write(entry["result"])
             if entry.get("fig") is not None:
                 st.plotly_chart(entry["fig"], use_container_width=True)
-            with st.expander("Generated code"):
-                st.code(entry["code"], language="python")
 
     if st.session_state.history:
         st.divider()
