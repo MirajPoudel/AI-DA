@@ -24,21 +24,63 @@ def extract_text(response) -> str:
     return str(content).strip()
 
 
-def invoke_with_retry(llm, messages, max_retries: int = 3, base_delay: float = 2.0):
-    """Retries an LLM call on transient errors (503 overloaded, 429 rate limit)
-    with exponential backoff. Raises the error if all retries are exhausted."""
+class QuotaExhaustedError(Exception):
+    """Raised when the daily/project quota is permanently exhausted."""
+    pass
+
+
+def invoke_with_retry(llm, messages, max_retries: int = 4, base_delay: float = 5.0):
+    """Retries an LLM call on transient rate-limit errors with exponential backoff.
+
+    - 429 per-minute limit  → waits and retries (up to max_retries times)
+    - 429 daily quota       → raises QuotaExhaustedError immediately (no point retrying)
+    - 503 / UNAVAILABLE     → waits and retries
+    - anything else         → re-raises immediately
+    """
+    DAILY_QUOTA_SIGNALS = (
+        "PerDay",
+        "daily",
+        "free_tier_requests",
+        "FreeTier",
+    )
+
     last_error = None
     for attempt in range(max_retries):
         try:
             return llm.invoke(messages)
         except Exception as e:
             error_str = str(e)
-            is_transient = "503" in error_str or "UNAVAILABLE" in error_str or "429" in error_str
-            if not is_transient or attempt == max_retries - 1:
-                raise
-            last_error = e
-            wait = base_delay * (2 ** attempt)
-            time.sleep(wait)
+
+            is_rate_limit = "429" in error_str or "RESOURCE_EXHAUSTED" in error_str
+            is_unavailable = "503" in error_str or "UNAVAILABLE" in error_str
+
+            if is_rate_limit:
+                # If ANY daily-quota signal appears, no amount of waiting helps.
+                if any(sig in error_str for sig in DAILY_QUOTA_SIGNALS):
+                    raise QuotaExhaustedError(
+                        "Your free-tier daily quota is exhausted. "
+                        "Try again tomorrow, switch to a paid API key, "
+                        "or use a different model."
+                    ) from e
+                # Per-minute rate limit — back off and retry
+                if attempt == max_retries - 1:
+                    raise
+                last_error = e
+                wait = base_delay * (2 ** attempt)   # 5 s, 10 s, 20 s, 40 s
+                time.sleep(wait)
+                continue
+
+            if is_unavailable:
+                if attempt == max_retries - 1:
+                    raise
+                last_error = e
+                wait = base_delay * (2 ** attempt)
+                time.sleep(wait)
+                continue
+
+            # Any other error — raise immediately
+            raise
+
     raise last_error
 
 

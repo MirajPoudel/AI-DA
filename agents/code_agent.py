@@ -1,4 +1,4 @@
-from utils import extract_text
+from utils import extract_text, invoke_with_retry
 import json
 
 SYSTEM_PROMPT = """You write Python code for pandas/plotly data analysis.
@@ -25,7 +25,7 @@ User question: {user_query}
 
 Write the code now."""
 
-    response = llm.invoke([
+    response = invoke_with_retry(llm, [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt}
     ])

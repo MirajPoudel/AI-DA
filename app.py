@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from utils import load_dataset
+from utils import load_dataset, QuotaExhaustedError
 from graph import build_graph
 from pdf_export import generate_pdf
 from sessions import (
@@ -171,11 +171,22 @@ else:
     query = st.chat_input("Ask a question about your data...")
     if query:
         with st.spinner("Analyzing..."):
-            result_state = st.session_state.graph.invoke({
-                "df": st.session_state.df,
-                "user_query": query,
-                "llm": st.session_state.llm,
-            })
+            try:
+                result_state = st.session_state.graph.invoke({
+                    "df": st.session_state.df,
+                    "user_query": query,
+                    "llm": st.session_state.llm,
+                })
+            except QuotaExhaustedError as e:
+                st.error(
+                    f"**Daily quota exhausted** ⚠️\n\n{e}\n\n"
+                    "**Options:** switch to OpenAI in the sidebar, "
+                    "use a paid Gemini key, or try again tomorrow."
+                )
+                st.stop()
+            except Exception as e:
+                st.error(f"**Error during analysis:** {e}")
+                st.stop()
 
         entry = {
             "query":   query,
