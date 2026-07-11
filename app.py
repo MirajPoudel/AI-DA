@@ -5,6 +5,7 @@ load_dotenv()
 
 from utils import load_dataset
 from graph import build_graph
+from pdf_export import generate_pdf
 
 st.set_page_config(page_title="AI Data Analyst", layout="wide")
 st.title("🧠 AI Data Analyst")
@@ -30,6 +31,23 @@ with st.sidebar:
 
     if st.session_state.df is not None:
         st.write(f"Rows: {st.session_state.df.shape[0]}, Cols: {st.session_state.df.shape[1]}")
+
+    st.divider()
+    st.header("Export")
+    if st.session_state.history:
+        dataset_name = uploaded.name if uploaded else "Dataset"
+        if st.button("📄 Generate PDF Report", use_container_width=True):
+            with st.spinner("Building PDF..."):
+                pdf_bytes = generate_pdf(st.session_state.history, dataset_name)
+            st.download_button(
+                label="⬇️ Download PDF",
+                data=pdf_bytes,
+                file_name="analysis_report.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+    else:
+        st.caption("Run an analysis first to export a report.")
 
 if st.session_state.df is None:
     st.info("Upload a dataset to get started.")
