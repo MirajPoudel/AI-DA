@@ -42,8 +42,9 @@ def _draw_table(pdf: FPDF, df: pd.DataFrame, max_rows: int = 12):
     num_cols = len(cols)
     page_width = pdf.w - pdf.l_margin - pdf.r_margin  # usable width
 
-    # Compute column widths proportionally (min 20, max 60)
-    col_w = min(60.0, max(20.0, page_width / num_cols))
+    # Compute column widths proportionally (min 20, max 45)
+    # Cap at 45 so the table stays compact rather than stretching full-page width
+    col_w = min(45.0, max(20.0, page_width / num_cols))
     # If total width exceeds page, shrink equally
     total = col_w * num_cols
     if total > page_width:
@@ -107,14 +108,14 @@ def generate_pdf(history: list, dataset_name: str = "Dataset") -> bytes:
         if direct_answer:
             pdf.set_font("Helvetica", "B", 13)
             pdf.set_text_color(20, 20, 20)
-            pdf.multi_cell(0, 8, direct_answer)
+            pdf.multi_cell(0, 8, direct_answer, align="J")
             pdf.ln(2)
 
         # ── Description (2-3 lines) ──────────────────────────────────
         if description:
             pdf.set_font("Helvetica", "", 10)
             pdf.set_text_color(70, 70, 70)
-            pdf.multi_cell(0, 6, description)
+            pdf.multi_cell(0, 6, description, align="J")
             pdf.ln(3)
 
         # ── Table (DataFrame result) ─────────────────────────────────
