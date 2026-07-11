@@ -1,36 +1,119 @@
-# AI Data Analyst (v1 - basics-focused)
+# 🧠 AI Data Analyst
 
-A lightweight, LangGraph-orchestrated, multi-agent data analysis app built with Streamlit and a local Ollama model (phi3). Upload a CSV/Excel/JSON dataset, ask questions in plain English, get computed results, a chart, and a short business insight.
+A multi-agent data analysis app built with **Streamlit** and **LangGraph**. Upload a CSV, Excel, JSON, or SQLite dataset, ask questions in plain English, and get computed results, interactive charts, and plain-English business insights — then export everything as a styled PDF report.
 
-## Setup
+Supports **Google Gemini** and **OpenAI (ChatGPT)** — users bring their own API key directly in the UI, so the app works for anyone without touching environment variables.
 
+---
+
+## Features
+
+- 📂 Upload CSV, Excel (.xlsx/.xls), JSON, or SQLite (.db) files
+- 💬 Ask questions in plain English — the AI plans, codes, and explains
+- 📊 Auto-generated interactive Plotly charts (colorful, titled)
+- 📄 Export full session as a PDF report (direct answer + description + bordered table + chart image)
+- 🔑 Built-in API key selector — choose Gemini or OpenAI, pick a model, paste your key
+- 🔒 Code sandbox — generated code runs in an isolated subprocess with banned-pattern checks
+
+---
+
+## Quickstart
+
+### 1. Install dependencies
+
+```bash
+pip install -r requirements.txt
 ```
-python -m venv venv
-venv\Scripts\activate
-python -m pip install -r requirements.txt
-ollama pull phi3
+
+### 2. Get an API key
+
+| Provider | Where to get a key | Key format |
+|---|---|---|
+| Google Gemini | https://aistudio.google.com/app/apikey | `AIza...` |
+| OpenAI (ChatGPT) | https://platform.openai.com/api-keys | `sk-...` |
+
+### 3. Run the app
+
+```bash
+streamlit run app.py
 ```
 
-## Run
+### 4. Use the app
 
-```
-python -m streamlit run app.py
-```
+1. Open the app in your browser (default: http://localhost:5000)
+2. In the sidebar → **AI Provider**: select your provider, pick a model, paste your API key, click **✅ Apply API Key**
+3. In the sidebar → **Dataset**: upload your file
+4. Ask questions in the chat box at the bottom
+5. Click **📄 Generate PDF Report** after running analyses to download a formatted report
+
+---
+
+## Running on Replit
+
+No extra setup needed — dependencies are installed via `pip install -r requirements.txt` and the app runs on port `5000` via the configured workflow (`streamlit run app.py`).
+
+---
+
+## Supported Models
+
+**Google Gemini**
+- `gemini-2.0-flash` *(fast, recommended)*
+- `gemini-1.5-pro`
+- `gemini-1.5-flash`
+
+**OpenAI**
+- `gpt-4o-mini` *(fast, cost-effective)*
+- `gpt-4o`
+- `gpt-3.5-turbo`
+
+---
 
 ## Architecture
 
-- `agents/profiler.py` — pandas-only dataset profiling (schema, nulls, dupes, correlations)
-- `agents/query_agent.py` — LLM plans the operation/columns/chart type
-- `agents/code_agent.py` — LLM generates pandas/plotly code
-- `sandbox.py` — runs generated code in an isolated subprocess with a timeout and a banned-pattern check (no os/sys/subprocess/eval/exec/open)
-- `agents/insight_agent.py` — LLM turns the result into a short plain-English insight
-- `graph.py` — LangGraph wiring the above into one pipeline
-- `app.py` — Streamlit chat UI
+```
+app.py                  — Streamlit UI, API key selector, session state
+graph.py                — LangGraph pipeline wiring all agents together
+sandbox.py              — Isolated subprocess executor with timeout + banned-pattern guard
+utils.py                — Dataset loader, LLM helper utilities
+pdf_export.py           — PDF report generator (fpdf2 + kaleido for chart images)
 
-## Known limitations (by design, for v1)
+agents/
+  profiler.py           — Pandas-only dataset profiling (schema, nulls, dupes, correlations)
+  query_agent.py        — LLM plans the operation, columns, and chart type
+  code_agent.py         — LLM generates pandas/plotly analysis code
+  insight_agent.py      — LLM writes a plain-English business insight from the result
+```
 
-- Single dataset at a time, no multi-file comparison
-- No PostgreSQL/MySQL/SQLite sources yet — CSV/Excel/JSON only
-- No PDF report generation yet
-- No authentication or persistent history across sessions
-- Sandbox is a locked-down local subprocess, not a true remote sandbox (E2B) — fine for personal/class use, not for hosting with untrusted public users
+### Pipeline flow
+
+```
+User question
+     │
+     ▼
+ [profiler]  →  [query_agent]  →  [code_agent]  →  [sandbox executor]  →  [insight_agent]
+                                                              │
+                                               result + fig + insight
+                                                              │
+                                                       Streamlit UI
+```
+
+---
+
+## PDF Report structure
+
+Each question in the report includes:
+
+1. **Question banner** (blue header)
+2. **Direct answer** — first sentence, bold and large (e.g. *"The West region has the most orders with 83 orders."*)
+3. **Description** — 2–3 sentence elaboration
+4. **Comparison table** — bordered, styled, with alternating row shading (if result is a DataFrame)
+5. **Chart image** — full-width Plotly chart rendered as PNG via kaleido
+
+---
+
+## Known Limitations
+
+- Single dataset per session — no multi-file joins
+- No persistent history across browser sessions
+- Sandbox is a locked-down local subprocess, not a remote sandbox (E2B) — suitable for personal or classroom use, not for untrusted public users
+- PDF chart rendering requires `kaleido==0.2.1` (bundled Chromium); kaleido ≥1.0 requires a system Chrome install
