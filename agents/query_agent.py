@@ -1,7 +1,8 @@
-from langchain_ollama import ChatOllama
+from langchain_google_genai import ChatGoogleGenerativeAI
+from utils import extract_text, invoke_with_retry
 import json
 
-llm = ChatOllama(model="phi3", temperature=0)
+llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
 
 SYSTEM_PROMPT = """You are a data analysis planner. Given a dataset profile and a user question,
 output ONLY a JSON object (no markdown, no explanation) with these keys:
@@ -20,12 +21,12 @@ User question: {user_query}
 
 Respond with JSON only."""
 
-    response = llm.invoke([
+    response = invoke_with_retry(llm, [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt}
     ])
 
-    text = response.content.strip()
+    text = extract_text(response)
     text = text.replace("```json", "").replace("```", "").strip()
 
     try:

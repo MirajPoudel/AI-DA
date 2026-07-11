@@ -3,5 +3,6 @@ pandas
 numpy
 plotly
 langgraph
-langchain-ollama
+langchain-google-genai
+python-dotenv
 openpyxl

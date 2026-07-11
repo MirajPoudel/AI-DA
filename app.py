@@ -1,4 +1,8 @@
 import streamlit as st
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from utils import load_dataset
 from graph import build_graph
 
@@ -16,8 +20,10 @@ if "history" not in st.session_state:
 
 with st.sidebar:
     st.header("Dataset")
-    uploaded = st.file_uploader("Upload CSV / Excel / JSON / SQLite (.db)",
-                             type=["csv", "xlsx", "xls", "json", "db"])
+    uploaded = st.file_uploader(
+        "Upload CSV / Excel / JSON / SQLite (.db)",
+        type=["csv", "xlsx", "xls", "json", "db"]
+    )
     if uploaded:
         st.session_state.df = load_dataset(uploaded)
         st.success(f"Loaded: {uploaded.name}")

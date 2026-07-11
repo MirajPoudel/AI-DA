@@ -1,6 +1,7 @@
-from langchain_ollama import ChatOllama
+from langchain_google_genai import ChatGoogleGenerativeAI
+from utils import extract_text
 
-llm = ChatOllama(model="phi3", temperature=0.3)
+llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.3)
 
 SYSTEM_PROMPT = """You are a business analyst. Given a user's question and the computed result,
 write 2-4 concise sentences of plain-English insight: what the numbers show, any notable
@@ -13,4 +14,4 @@ def generate_insight(user_query: str, result) -> str:
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt}
     ])
-    return response.content.strip()
+    return extract_text(response)

@@ -1,7 +1,8 @@
-from langchain_ollama import ChatOllama
+from langchain_google_genai import ChatGoogleGenerativeAI
+from utils import extract_text
 import json
 
-llm = ChatOllama(model="phi3", temperature=0)
+llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
 
 SYSTEM_PROMPT = """You write Python code for pandas/plotly data analysis.
 Rules:
@@ -29,6 +30,6 @@ Write the code now."""
         {"role": "user", "content": prompt}
     ])
 
-    code = response.content.strip()
+    code = extract_text(response)
     code = code.replace("```python", "").replace("```", "").strip()
     return code

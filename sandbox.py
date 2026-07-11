@@ -3,9 +3,26 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import multiprocessing
+import builtins
 import traceback
 
-BANNED = ["import os", "import sys", "subprocess", "eval(", "exec(", "open(", "__import__"]
+BANNED = ["import os", "import sys", "subprocess", "eval(", "exec(", "open(", "__import__", "importlib"]
+
+# Modules the sandboxed code is allowed to import.
+ALLOWED_MODULES = {
+    "pandas", "numpy", "plotly", "plotly.express", "plotly.graph_objects",
+    "math", "statistics", "datetime",
+}
+
+
+def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    """Restricted __import__: only allows whitelisted modules."""
+    top_level = name.split(".")[0]
+    allowed_top_levels = {m.split(".")[0] for m in ALLOWED_MODULES}
+    if top_level not in allowed_top_levels:
+        raise ImportError(f"Import of '{name}' is not allowed in the sandbox")
+    return builtins.__import__(name, globals, locals, fromlist, level)
+
 
 # Safe builtins re-added since exec() below strips __builtins__ for security.
 SAFE_BUILTINS = {
@@ -13,6 +30,7 @@ SAFE_BUILTINS = {
     "str": str, "int": int, "float": float, "bool": bool, "sum": sum,
     "min": min, "max": max, "sorted": sorted, "enumerate": enumerate,
     "zip": zip, "abs": abs, "round": round, "print": print,
+    "__import__": _safe_import,
 }
 
 
