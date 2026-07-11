@@ -1,8 +1,5 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
 from utils import extract_text
 import json
-
-llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
 
 SYSTEM_PROMPT = """You write Python code for pandas/plotly data analysis.
 Rules:
@@ -18,7 +15,7 @@ Rules:
 """
 
 
-def generate_code(plan: dict, profile: dict, user_query: str) -> str:
+def generate_code(plan: dict, profile: dict, user_query: str, llm) -> str:
     prompt = f"""Dataset columns: {profile['columns']}
 Numeric columns: {profile['numeric_columns']}
 Categorical columns: {profile['categorical_columns']}

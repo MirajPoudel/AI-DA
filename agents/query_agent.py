@@ -1,8 +1,5 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
 from utils import extract_text, invoke_with_retry
 import json
-
-llm = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
 
 SYSTEM_PROMPT = """You are a data analysis planner. Given a dataset profile and a user question,
 output ONLY a JSON object (no markdown, no explanation) with these keys:
@@ -13,7 +10,7 @@ output ONLY a JSON object (no markdown, no explanation) with these keys:
 """
 
 
-def plan_query(profile: dict, user_query: str) -> dict:
+def plan_query(profile: dict, user_query: str, llm) -> dict:
     prompt = f"""Dataset profile:
 {json.dumps(profile, default=str)[:3000]}
 

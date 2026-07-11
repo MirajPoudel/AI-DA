@@ -12,6 +12,7 @@ from sandbox import run_code_safely
 class GraphState(TypedDict):
     df: pd.DataFrame
     user_query: str
+    llm: Any
     profile: Optional[dict]
     plan: Optional[dict]
     code: Optional[str]
@@ -27,12 +28,12 @@ def profile_node(state: GraphState) -> GraphState:
 
 
 def plan_node(state: GraphState) -> GraphState:
-    state["plan"] = plan_query(state["profile"], state["user_query"])
+    state["plan"] = plan_query(state["profile"], state["user_query"], state["llm"])
     return state
 
 
 def code_node(state: GraphState) -> GraphState:
-    state["code"] = generate_code(state["plan"], state["profile"], state["user_query"])
+    state["code"] = generate_code(state["plan"], state["profile"], state["user_query"], state["llm"])
     return state
 
 
@@ -48,7 +49,7 @@ def insight_node(state: GraphState) -> GraphState:
     if state["error"]:
         state["insight"] = f"Execution failed: {state['error']}"
     else:
-        state["insight"] = generate_insight(state["user_query"], state["result"])
+        state["insight"] = generate_insight(state["user_query"], state["result"], state["llm"])
     return state
 
 
