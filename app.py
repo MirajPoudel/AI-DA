@@ -32,22 +32,6 @@ with st.sidebar:
     if st.session_state.df is not None:
         st.write(f"Rows: {st.session_state.df.shape[0]}, Cols: {st.session_state.df.shape[1]}")
 
-    st.divider()
-    st.header("Export")
-    if st.session_state.history:
-        dataset_name = uploaded.name if uploaded else "Dataset"
-        if st.button("📄 Generate PDF Report", use_container_width=True):
-            with st.spinner("Building PDF..."):
-                pdf_bytes = generate_pdf(st.session_state.history, dataset_name)
-            st.download_button(
-                label="⬇️ Download PDF",
-                data=pdf_bytes,
-                file_name="analysis_report.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-            )
-    else:
-        st.caption("Run an analysis first to export a report.")
 
 if st.session_state.df is None:
     st.info("Upload a dataset to get started.")
@@ -66,6 +50,25 @@ else:
                 st.plotly_chart(entry["fig"], use_container_width=True)
             with st.expander("Generated code"):
                 st.code(entry["code"], language="python")
+
+    if st.session_state.history:
+        st.divider()
+        dataset_name = uploaded.name if uploaded else "Dataset"
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("📄 Generate PDF Report", use_container_width=True):
+                with st.spinner("Building PDF..."):
+                    pdf_bytes = generate_pdf(st.session_state.history, dataset_name)
+                st.session_state.pdf_bytes = pdf_bytes
+        with col2:
+            if st.session_state.get("pdf_bytes"):
+                st.download_button(
+                    label="⬇️ Download PDF",
+                    data=st.session_state.pdf_bytes,
+                    file_name="analysis_report.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
 
     query = st.chat_input("Ask a question about your data...")
     if query:
