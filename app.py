@@ -54,24 +54,40 @@ with st.sidebar:
                                 help="Get your key at https://platform.openai.com/api-keys")
 
     if st.button("✅ Apply API Key", use_container_width=True):
-        if not api_key.strip():
+        key_val = api_key.strip()
+        if not key_val:
             st.error("Please enter an API key.")
         else:
+            # ── Auto-detect provider from key format ──────────────────
+            detected = None
+            if key_val.startswith("AIza"):
+                detected = "Google Gemini"
+            elif key_val.startswith("sk-"):
+                detected = "OpenAI (ChatGPT)"
+
+            if detected and detected != provider:
+                st.session_state["provider_select"] = detected
+                provider = detected
+                # Pick a sensible default model for the detected provider
+                model = ("gemini-2.0-flash" if detected == "Google Gemini"
+                         else "gpt-4o-mini")
+                st.info(f"🔍 Auto-detected **{detected}** from your key format — switched automatically.")
+
             try:
                 if provider == "Google Gemini":
                     from langchain_google_genai import ChatGoogleGenerativeAI
                     llm = ChatGoogleGenerativeAI(model=model, temperature=0,
-                                                google_api_key=api_key.strip())
+                                                google_api_key=key_val)
                 else:
                     from langchain_openai import ChatOpenAI
                     llm = ChatOpenAI(model=model, temperature=0,
-                                    api_key=api_key.strip())
+                                    api_key=key_val)
                 st.session_state.llm = llm
                 st.session_state.history = []
                 st.session_state.session_id = new_session_id()
                 st.session_state.session_title = None
                 st.session_state.pdf_bytes = None
-                st.success(f"Connected to {provider}!")
+                st.success(f"Connected to {provider} / {model}!")
             except Exception as e:
                 st.error(f"Failed to initialise LLM: {e}")
 
