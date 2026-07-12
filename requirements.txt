@@ -4,5 +4,8 @@ numpy
 plotly
 langgraph
 langchain-google-genai
+langchain-openai
 python-dotenv
 openpyxl
+fpdf2
+kaleido==0.2.1
