@@ -55,6 +55,14 @@ def invoke_with_retry(llm, messages, max_retries: int = 4, base_delay: float = 5
             is_unavailable = "503" in error_str or "UNAVAILABLE" in error_str
 
             if is_rate_limit:
+                # OpenAI: no billing / trial expired
+                if "insufficient_quota" in error_str:
+                    raise QuotaExhaustedError(
+                        "Your OpenAI account has no remaining credits. "
+                        "Add a payment method and buy credits at "
+                        "https://platform.openai.com/settings/billing — "
+                        "$5 will last a long time with gpt-4o-mini."
+                    ) from e
                 # If ANY daily-quota signal appears, no amount of waiting helps.
                 if any(sig in error_str for sig in DAILY_QUOTA_SIGNALS):
                     raise QuotaExhaustedError(
