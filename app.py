@@ -14,6 +14,9 @@ from sessions import (
 st.set_page_config(page_title="AI Data Analyst", layout="wide")
 st.title("🧠 AI Data Analyst")
 
+# ── Constants ─────────────────────────────────────────────────────────────────
+GEMINI_FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+
 # ── Session state defaults ────────────────────────────────────────────────────
 if "graph" not in st.session_state:
     st.session_state.graph = build_graph()
@@ -27,6 +30,13 @@ if "session_id" not in st.session_state:
     st.session_state.session_id = new_session_id()
 if "session_title" not in st.session_state:
     st.session_state.session_title = None
+# Store key/provider so fallback can rebuild the LLM with a different model
+if "active_provider" not in st.session_state:
+    st.session_state.active_provider = None
+if "active_api_key" not in st.session_state:
+    st.session_state.active_api_key = None
+if "active_model" not in st.session_state:
+    st.session_state.active_model = None
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -83,6 +93,9 @@ with st.sidebar:
                     llm = ChatOpenAI(model=model, temperature=0,
                                     api_key=key_val)
                 st.session_state.llm = llm
+                st.session_state.active_provider = provider
+                st.session_state.active_api_key = key_val
+                st.session_state.active_model = model
                 st.session_state.history = []
                 st.session_state.session_id = new_session_id()
                 st.session_state.session_title = None
@@ -187,21 +200,65 @@ else:
     query = st.chat_input("Ask a question about your data...")
     if query:
         with st.spinner("Analyzing..."):
-            try:
-                result_state = st.session_state.graph.invoke({
-                    "df": st.session_state.df,
-                    "user_query": query,
-                    "llm": st.session_state.llm,
-                })
-            except QuotaExhaustedError as e:
+            result_state = None
+            last_error = None
+
+            # Build the list of LLMs to try: current one first, then Gemini
+            # fallbacks (only when the active provider is Gemini).
+            llms_to_try = [st.session_state.llm]
+
+            if st.session_state.active_provider == "Google Gemini":
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                current_model = st.session_state.active_model
+                tried = {current_model}
+                for fallback_model in GEMINI_FALLBACK_MODELS:
+                    if fallback_model not in tried:
+                        llms_to_try.append(
+                            ChatGoogleGenerativeAI(
+                                model=fallback_model,
+                                temperature=0,
+                                google_api_key=st.session_state.active_api_key,
+                            )
+                        )
+                        tried.add(fallback_model)
+
+            original_model = st.session_state.active_model
+
+            for i, llm_attempt in enumerate(llms_to_try):
+                try:
+                    result_state = st.session_state.graph.invoke({
+                        "df": st.session_state.df,
+                        "user_query": query,
+                        "llm": llm_attempt,
+                    })
+                    # Success — if we used a fallback, update active LLM & show notice
+                    if i > 0:
+                        new_model = llm_attempt.model
+                        st.session_state.llm = llm_attempt
+                        st.session_state.active_model = new_model
+                        st.warning(
+                            f"⚠️ **{original_model}** quota exhausted — "
+                            f"automatically switched to **{new_model}** and completed your request."
+                        )
+                    last_error = None
+                    break  # done
+                except QuotaExhaustedError as e:
+                    last_error = e
+                    continue  # try next model
+                except Exception as e:
+                    st.error(f"**Error during analysis:** {e}")
+                    st.stop()
+
+            if result_state is None:
+                # All models exhausted
                 st.error(
-                    f"**Daily quota exhausted** ⚠️\n\n{e}\n\n"
-                    "**Options:** switch to OpenAI in the sidebar, "
-                    "use a paid Gemini key, or try again tomorrow."
+                    "**All Gemini free-tier models are quota-exhausted for today** ⚠️\n\n"
+                    "**Quick fixes:**\n"
+                    "- 🔄 Try again tomorrow (quota resets at midnight Pacific)\n"
+                    "- 💳 [Add billing to your Gemini key](https://aistudio.google.com) for unlimited requests\n"
+                    "- 🔀 Switch to **OpenAI** in the sidebar (needs billing credits at "
+                    "https://platform.openai.com/settings/billing)"
                 )
-                st.stop()
-            except Exception as e:
-                st.error(f"**Error during analysis:** {e}")
                 st.stop()
 
         entry = {
