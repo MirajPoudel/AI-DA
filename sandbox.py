@@ -1,7 +1,4 @@
 import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
 import multiprocessing
 import builtins
 import traceback
@@ -36,6 +33,9 @@ SAFE_BUILTINS = {
 
 def _worker(code, df, queue):
     try:
+        import numpy as np
+        import plotly.express as px
+        import plotly.graph_objects as go
         local_env = {"df": df, "pd": pd, "np": np, "px": px, "go": go}
         exec(code, {"__builtins__": SAFE_BUILTINS}, local_env)
         queue.put({"result": local_env.get("result"), "fig": local_env.get("fig"), "error": None})
