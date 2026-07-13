@@ -4,6 +4,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from utils import load_dataset, QuotaExhaustedError
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    """Walk the exception chain — LangGraph wraps node errors, so
+    QuotaExhaustedError may not be the top-level exception type."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, QuotaExhaustedError):
+            return True
+        # Also catch by message in case it's been stringified through a wrapper
+        if "free-tier daily quota is exhausted" in str(exc) or \
+           "insufficient_quota" in str(exc):
+            return True
+        exc = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
+    return False
 from graph import build_graph
 from pdf_export import generate_pdf
 from sessions import (
@@ -242,10 +258,10 @@ else:
                         )
                     last_error = None
                     break  # done
-                except QuotaExhaustedError as e:
-                    last_error = e
-                    continue  # try next model
                 except Exception as e:
+                    if _is_quota_error(e):
+                        last_error = e
+                        continue  # try next model
                     st.error(f"**Error during analysis:** {e}")
                     st.stop()
 
