@@ -32,6 +32,12 @@ st.title("🧠 AI Data Analyst")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 GEMINI_FALLBACK_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+GROQ_FALLBACK_MODELS   = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
+    "mixtral-8x7b-32768",
+]
 
 # ── Session state defaults ────────────────────────────────────────────────────
 if "graph" not in st.session_state:
@@ -62,11 +68,22 @@ with st.sidebar:
 
     provider = st.selectbox(
         "Select provider",
-        ["Google Gemini", "OpenAI (ChatGPT)"],
+        ["Groq (Free)", "Google Gemini", "OpenAI (ChatGPT)"],
         key="provider_select",
     )
 
-    if provider == "Google Gemini":
+    if provider == "Groq (Free)":
+        model_options = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "gemma2-9b-it",
+            "mixtral-8x7b-32768",
+        ]
+        model = st.selectbox("Model", model_options, key="groq_model")
+        api_key = st.text_input("Groq API Key", type="password",
+                                placeholder="gsk_...",
+                                help="Free key at https://console.groq.com — 14,400 req/day")
+    elif provider == "Google Gemini":
         model_options = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
         model = st.selectbox("Model", model_options, key="gemini_model")
         api_key = st.text_input("Gemini API Key", type="password",
@@ -90,13 +107,18 @@ with st.sidebar:
                 detected = "Google Gemini"
             elif key_val.startswith("sk-"):
                 detected = "OpenAI (ChatGPT)"
+            elif key_val.startswith("gsk_"):
+                detected = "Groq (Free)"
 
             if detected and detected != provider:
                 st.session_state["provider_select"] = detected
                 provider = detected
-                # Pick a sensible default model for the detected provider
-                model = ("gemini-2.0-flash" if detected == "Google Gemini"
-                         else "gpt-4o-mini")
+                default_models = {
+                    "Google Gemini": "gemini-2.0-flash",
+                    "OpenAI (ChatGPT)": "gpt-4o-mini",
+                    "Groq (Free)": "llama-3.3-70b-versatile",
+                }
+                model = default_models[detected]
                 st.info(f"🔍 Auto-detected **{detected}** from your key format — switched automatically.")
 
             try:
@@ -104,6 +126,10 @@ with st.sidebar:
                     from langchain_google_genai import ChatGoogleGenerativeAI
                     llm = ChatGoogleGenerativeAI(model=model, temperature=0,
                                                 google_api_key=key_val)
+                elif provider == "Groq (Free)":
+                    from langchain_groq import ChatGroq
+                    llm = ChatGroq(model=model, temperature=0,
+                                   groq_api_key=key_val)
                 else:
                     from langchain_openai import ChatOpenAI
                     llm = ChatOpenAI(model=model, temperature=0,
@@ -219,14 +245,13 @@ else:
             result_state = None
             last_error = None
 
-            # Build the list of LLMs to try: current one first, then Gemini
-            # fallbacks (only when the active provider is Gemini).
+            # Build the list of LLMs to try: current one first, then
+            # fallbacks for the same provider (each model has its own quota).
             llms_to_try = [st.session_state.llm]
 
             if st.session_state.active_provider == "Google Gemini":
                 from langchain_google_genai import ChatGoogleGenerativeAI
-                current_model = st.session_state.active_model
-                tried = {current_model}
+                tried = {st.session_state.active_model}
                 for fallback_model in GEMINI_FALLBACK_MODELS:
                     if fallback_model not in tried:
                         llms_to_try.append(
@@ -234,6 +259,20 @@ else:
                                 model=fallback_model,
                                 temperature=0,
                                 google_api_key=st.session_state.active_api_key,
+                            )
+                        )
+                        tried.add(fallback_model)
+
+            elif st.session_state.active_provider == "Groq (Free)":
+                from langchain_groq import ChatGroq
+                tried = {st.session_state.active_model}
+                for fallback_model in GROQ_FALLBACK_MODELS:
+                    if fallback_model not in tried:
+                        llms_to_try.append(
+                            ChatGroq(
+                                model=fallback_model,
+                                temperature=0,
+                                groq_api_key=st.session_state.active_api_key,
                             )
                         )
                         tried.add(fallback_model)
@@ -267,14 +306,23 @@ else:
 
             if result_state is None:
                 # All models exhausted
-                st.error(
-                    "**All Gemini free-tier models are quota-exhausted for today** ⚠️\n\n"
-                    "**Quick fixes:**\n"
-                    "- 🔄 Try again tomorrow (quota resets at midnight Pacific)\n"
-                    "- 💳 [Add billing to your Gemini key](https://aistudio.google.com) for unlimited requests\n"
-                    "- 🔀 Switch to **OpenAI** in the sidebar (needs billing credits at "
-                    "https://platform.openai.com/settings/billing)"
-                )
+                ap = st.session_state.active_provider
+                if ap == "Groq (Free)":
+                    st.error(
+                        "**All Groq free-tier models are quota-exhausted** ⚠️\n\n"
+                        "**Quick fixes:**\n"
+                        "- 🔄 Try again in an hour (Groq resets per minute/hour, not just daily)\n"
+                        "- 🔀 Switch to **Google Gemini** in the sidebar for a fresh free quota\n"
+                        "- 💳 Or add billing to your Groq account at https://console.groq.com"
+                    )
+                else:
+                    st.error(
+                        "**All Gemini free-tier models are quota-exhausted for today** ⚠️\n\n"
+                        "**Quick fixes:**\n"
+                        "- 🔄 Try again tomorrow (resets at midnight Pacific)\n"
+                        "- 🔀 Switch to **Groq (Free)** in the sidebar — get a free key at https://console.groq.com\n"
+                        "- 💳 Or add billing to your Gemini key at https://aistudio.google.com"
+                    )
                 st.stop()
 
         entry = {

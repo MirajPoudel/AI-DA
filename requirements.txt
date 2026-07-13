@@ -5,6 +5,7 @@ plotly
 langgraph
 langchain-google-genai
 langchain-openai
+langchain-groq
 python-dotenv
 openpyxl
 fpdf2
