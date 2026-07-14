@@ -5,6 +5,7 @@ import pandas as pd
 
 from auto_analysis import (
     _label,
+    _prepare_categorical,
     compute_full_facts,
     build_descriptive_stats_table,
     build_correlation_heatmap,
@@ -326,7 +327,7 @@ def generate_full_analysis_pdf(df: pd.DataFrame, dataset_name: str = "Dataset", 
     # ── Category Breakdown (up to 4 categorical columns) ─────────────────
     for col in categorical_cols[:4]:
         try:
-            counts, fig = build_top_categories(df, col)
+            counts, fig, was_exploded = build_top_categories(df, col)
         except Exception:
             continue
         if counts is None or counts.empty:
@@ -339,6 +340,12 @@ def generate_full_analysis_pdf(df: pd.DataFrame, dataset_name: str = "Dataset", 
                 lead_text += f', followed by "{leaders[1][0]}" ({leaders[1][1]:,}).'
             else:
                 lead_text += "."
+            if was_exploded:
+                lead_text += (
+                    f" This column stores multiple values per record (e.g. several tags in "
+                    f"one field), so each record is counted once under every individual "
+                    f"{_label(col)} it lists, rather than once under the combined text."
+                )
             _paragraph(pdf, lead_text)
         _draw_table(pdf, counts, max_rows=10)
         _chart_or_note(fig)
@@ -346,9 +353,10 @@ def generate_full_analysis_pdf(df: pd.DataFrame, dataset_name: str = "Dataset", 
     # ── Average <numeric> by <category> ──────────────────────────────────
     if numeric_cols and categorical_cols:
         num_col, cat_col = numeric_cols[0], categorical_cols[0]
-        if df[cat_col].nunique() <= 40:
+        prepared_cat, _ = _prepare_categorical(df, cat_col)
+        if prepared_cat[cat_col].nunique() <= 40:
             _section_title(pdf, f"Average {_label(num_col)} by {_label(cat_col)}")
-            avg_table, avg_fig = build_avg_by_category(df, cat_col, num_col)
+            avg_table, avg_fig, _ = build_avg_by_category(df, cat_col, num_col)
             _draw_table(pdf, avg_table, max_rows=15)
             _chart_or_note(avg_fig)
 

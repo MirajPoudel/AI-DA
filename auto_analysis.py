@@ -7,6 +7,8 @@ calls so the report always renders instantly; `agents/narrative_agent.py`
 can optionally upgrade the prose when an LLM key is available.
 """
 
+import re
+
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -14,9 +16,52 @@ import plotly.express as px
 CHART_TEMPLATE = "plotly_white"
 COLOR_SEQ = px.colors.qualitative.Bold
 
+# Common separators used when a single field packs multiple tags/values into
+# one string, e.g. a movie's genres stored as "Action|Adventure|Comedy".
+MULTI_VALUE_DELIMITERS = ["|", ";", "/"]
+
 
 def _label(col: str) -> str:
     return str(col).replace("_", " ").replace("-", " ").title()
+
+
+def detect_multi_value_delimiter(series: pd.Series):
+    """If a categorical column packs several values into one string (e.g.
+    genres as "Action|Adventure"), return the delimiter used; otherwise None.
+    A column only counts as multi-value if the delimiter shows up in a
+    healthy share of its non-null values (not just one stray row)."""
+    s = series.dropna().astype(str)
+    if s.empty:
+        return None
+    sample = s if len(s) <= 500 else s.sample(500, random_state=0)
+    for delim in MULTI_VALUE_DELIMITERS:
+        frac = sample.str.contains(re.escape(delim), regex=True).mean()
+        if frac > 0.3:
+            return delim
+    return None
+
+
+def explode_multi_value_column(df: pd.DataFrame, col: str, delimiter: str) -> pd.DataFrame:
+    """Split a packed multi-value column (e.g. "Action|Adventure") into one
+    row per value (e.g. one row tagged "Action", one tagged "Adventure"),
+    duplicating the rest of the row's data so each value is analysed as its
+    own category — the record now belongs to *each* of its categories,
+    rather than one combined-string category."""
+    out = df.copy()
+    out[col] = out[col].astype(str).str.split(re.escape(delimiter))
+    out = out.explode(col)
+    out[col] = out[col].str.strip()
+    out = out[out[col] != ""]
+    return out
+
+
+def _prepare_categorical(df: pd.DataFrame, col: str):
+    """Return (dataframe, was_exploded) ready for per-category analysis,
+    exploding packed multi-value columns first if needed."""
+    delimiter = detect_multi_value_delimiter(df[col])
+    if delimiter:
+        return explode_multi_value_column(df, col, delimiter), True
+    return df, False
 
 
 # ── Facts (pure computation, no LLM) ────────────────────────────────────────
@@ -49,8 +94,12 @@ def compute_full_facts(df: pd.DataFrame) -> dict:
             top_corr_pair = (c1, c2, round(float(signed), 2))
 
     category_leaders = {}
+    multi_value_cols = {}
     for c in categorical_cols[:6]:
-        vc = df[c].astype(str).value_counts()
+        exploded, was_exploded = _prepare_categorical(df, c)
+        if was_exploded:
+            multi_value_cols[c] = True
+        vc = exploded[c].astype(str).value_counts()
         if not vc.empty:
             category_leaders[c] = [(str(k), int(v)) for k, v in vc.head(2).items()]
 
@@ -64,6 +113,7 @@ def compute_full_facts(df: pd.DataFrame) -> dict:
         "zero_heavy": zero_heavy,
         "top_corr_pair": top_corr_pair,
         "category_leaders": category_leaders,
+        "multi_value_cols": multi_value_cols,
     }
 
 
@@ -109,25 +159,31 @@ def build_correlation_heatmap(df: pd.DataFrame, numeric_cols: list):
 def build_top_categories(df: pd.DataFrame, col: str, top_n: int = 10):
     """Top-N most frequent values for a categorical column, as (table, chart).
 
-    The chart axis uses short position labels ("1", "2", ...) instead of the
-    full category text — the actual values only appear in the accompanying
-    table (and in the hover tooltip), so long category names never clutter
-    the chart itself."""
-    counts = df[col].astype(str).value_counts().head(top_n).reset_index()
+    If the column packs multiple values into one string (e.g. a movie's
+    genres as "Action|Adventure"), it is exploded first so each value is
+    counted as its own category — a movie tagged "Action|Adventure" counts
+    once under Action and once under Adventure, not once under the combined
+    string. The chart axis uses short position labels ("1", "2", ...) instead
+    of the full category text — the actual values only appear in the
+    accompanying table (and in the hover tooltip), so long category names
+    never clutter the chart itself."""
+    prepared, was_exploded = _prepare_categorical(df, col)
+    counts = prepared[col].astype(str).value_counts().head(top_n).reset_index()
     counts.columns = [col, "Count"]
     counts.insert(0, "#", [str(i + 1) for i in range(len(counts))])
 
     label = _label(col)
+    note = " — one record per individual value" if was_exploded else ""
     fig = px.bar(
         counts, x="#", y="Count",
         color_discrete_sequence=[COLOR_SEQ[0]],
-        title=f"Top {len(counts)} {label} by Count (see table for names)",
+        title=f"Top {len(counts)} {label} by Count (see table for names){note}",
         labels={"#": label, "Count": "Number of Records"},
         hover_data={col: True, "#": False},
     )
     fig.update_xaxes(type="category")
     fig.update_layout(template=CHART_TEMPLATE, font=dict(size=13), showlegend=False)
-    return counts, fig
+    return counts, fig, was_exploded
 
 
 def build_numeric_distribution(df: pd.DataFrame, col: str):
@@ -172,11 +228,17 @@ def build_scatter_regression(df: pd.DataFrame, x_col: str, y_col: str):
 
 
 def build_avg_by_category(df: pd.DataFrame, cat_col: str, num_col: str, top_n: int = 15):
-    """Average of `num_col` per `cat_col`, as (table, chart). Like
-    `build_top_categories`, the chart uses short position labels and the
-    full category names live only in the returned table / hover tooltip."""
+    """Average of `num_col` per `cat_col`, as (table, chart, was_exploded).
+
+    If `cat_col` packs multiple values into one string (e.g. genres as
+    "Action|Adventure"), it is exploded first so a movie's revenue counts
+    toward the average for *each* of its genres, not toward one combined
+    "Action|Adventure" bucket. Like `build_top_categories`, the chart uses
+    short position labels and the full category names live only in the
+    returned table / hover tooltip."""
+    prepared, was_exploded = _prepare_categorical(df, cat_col)
     grouped = (
-        df.groupby(cat_col)[num_col]
+        prepared.groupby(cat_col)[num_col]
         .mean()
         .round(2)
         .sort_values(ascending=False)
@@ -186,16 +248,17 @@ def build_avg_by_category(df: pd.DataFrame, cat_col: str, num_col: str, top_n: i
     grouped.insert(0, "#", [str(i + 1) for i in range(len(grouped))])
 
     label_cat, label_num = _label(cat_col), _label(num_col)
+    note = " — one record per individual value" if was_exploded else ""
     fig = px.bar(
         grouped, x="#", y=num_col,
         color_discrete_sequence=[COLOR_SEQ[3]],
-        title=f"Average {label_num} by {label_cat} (see table for names)",
+        title=f"Average {label_num} by {label_cat} (see table for names){note}",
         labels={"#": label_cat, num_col: f"Average {label_num}"},
         hover_data={cat_col: True, "#": False},
     )
     fig.update_xaxes(type="category")
     fig.update_layout(template=CHART_TEMPLATE, font=dict(size=13), showlegend=False)
-    return grouped, fig
+    return grouped, fig, was_exploded
 
 
 def build_boxplot(df: pd.DataFrame, col: str):
@@ -229,7 +292,7 @@ def write_overview_narrative(df: pd.DataFrame, facts: dict) -> str:
 def write_quality_narrative(facts: dict) -> str:
     parts = []
     if not facts["missing_cols"]:
-        parts.append("No missing values were found in any column — the dataset is fully complete.")
+        parts.append("No missing values were found in any column - the dataset is fully complete.")
     else:
         items = ", ".join(f"{c} ({v:,} missing)" for c, v in list(facts["missing_cols"].items())[:8])
         parts.append(f"The following columns contain missing values: {items}.")

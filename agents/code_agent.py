@@ -24,6 +24,12 @@ Rules:
     to `result`, plot that short column on the axis instead of the raw text, and pass the full
     text via `hover_data={"original_col": True}` so it only appears in the table (`result`,
     already shown to the user) and in hover tooltips — never crowding the chart itself.
+  - If a categorical column packs multiple values into one string using a separator (e.g. a
+    movie's genres stored as "Action|Adventure|Comedy", using "|", ";", or "/"), split that
+    column and explode it into one row per individual value BEFORE counting/grouping/charting
+    (`df.assign(col=df["col"].str.split("|")).explode("col")`, stripping whitespace). A record
+    then belongs under each of its individual values (e.g. once under "Action" and once under
+    "Adventure"), never under the combined string as if it were a single category.
   - Make charts visually polished: use color_discrete_sequence=px.colors.qualitative.Bold
     (categorical) or color_continuous_scale="Viridis" (continuous), set template="plotly_white",
     give it a clear, descriptive title, and apply fig.update_layout(font=dict(size=13),
