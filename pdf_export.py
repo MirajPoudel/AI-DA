@@ -4,12 +4,21 @@ from fpdf import FPDF
 import pandas as pd
 
 from auto_analysis import (
-    build_overview_stats,
-    build_numeric_summary_table,
+    _label,
+    compute_full_facts,
+    build_descriptive_stats_table,
     build_correlation_heatmap,
     build_top_categories,
     build_numeric_distribution,
+    build_scatter_regression,
+    build_avg_by_category,
+    build_boxplot,
+    write_overview_narrative,
+    write_quality_narrative,
+    write_key_findings,
+    write_summary_narrative,
 )
+from agents.narrative_agent import generate_report_narrative
 
 
 class AnalysisPDF(FPDF):
@@ -64,6 +73,22 @@ def _add_chart_image(pdf: FPDF, fig, tmp_files: list, width: float = 188):
         pdf.add_page()
     pdf.image(tmp.name, x=10, w=width)
     pdf.ln(4)
+
+
+def _draw_bullets(pdf: FPDF, items: list):
+    pdf.set_font("Helvetica", "", 10.5)
+    pdf.set_text_color(30, 30, 30)
+    for item in items:
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 6, f"-  {item}")
+    pdf.ln(2)
+
+
+def _paragraph(pdf: FPDF, text: str):
+    pdf.set_font("Helvetica", "", 10.5)
+    pdf.set_text_color(40, 40, 40)
+    pdf.multi_cell(0, 6, text, align="J")
+    pdf.ln(3)
 
 
 def _draw_table(pdf: FPDF, df: pd.DataFrame, max_rows: int = 10):
@@ -213,10 +238,14 @@ def generate_pdf(history: list, dataset_name: str = "Dataset") -> bytes:
     return pdf_bytes
 
 
-def generate_full_analysis_pdf(df: pd.DataFrame, dataset_name: str = "Dataset") -> bytes:
-    """Generate a full, automatic dataset analysis report (no LLM/chat needed):
-    overview stats, numeric summary statistics, correlations, top-10 category
-    breakdowns, and numeric distributions — all with nicely labeled charts."""
+def generate_full_analysis_pdf(df: pd.DataFrame, dataset_name: str = "Dataset", llm=None) -> bytes:
+    """Generate a full, narrative dataset analysis report in the style of a
+    professional data-analysis writeup: dataset overview, data-quality
+    assessment, descriptive statistics, distributions, correlation analysis
+    (with a scatter + trend line for the strongest pair), category breakdowns,
+    an average-by-category comparison, outlier boxplots, key findings, and a
+    closing summary. Works instantly with template-written prose; if `llm` is
+    provided, the narrative sections are upgraded with AI-written text."""
     pdf = AnalysisPDF()
     pdf.set_auto_page_break(auto=True, margin=20)
     pdf.add_page()
@@ -227,9 +256,23 @@ def generate_full_analysis_pdf(df: pd.DataFrame, dataset_name: str = "Dataset") 
     pdf.ln(4)
 
     tmp_files = []
-    overview = build_overview_stats(df)
-    numeric_cols = overview["numeric_columns"]
-    categorical_cols = overview["categorical_columns"]
+    facts = compute_full_facts(df)
+    numeric_cols = facts["numeric_columns"]
+    categorical_cols = facts["categorical_columns"]
+
+    # Try an LLM-written narrative; always fall back to the template text
+    # below if no LLM is available or the call fails for any reason.
+    narrative = None
+    if llm is not None:
+        try:
+            narrative = generate_report_narrative(facts, llm)
+        except Exception:
+            narrative = None
+
+    overview_text = (narrative or {}).get("overview") or write_overview_narrative(df, facts)
+    quality_text = (narrative or {}).get("quality") or write_quality_narrative(facts)
+    key_findings = (narrative or {}).get("key_findings") or write_key_findings(facts)
+    summary_text = (narrative or {}).get("summary") or write_summary_narrative(facts)
 
     def _chart_or_note(fig):
         try:
@@ -239,47 +282,88 @@ def generate_full_analysis_pdf(df: pd.DataFrame, dataset_name: str = "Dataset") 
             pdf.set_text_color(180, 60, 60)
             pdf.cell(0, 6, f"[Chart could not be rendered: {e}]", new_x="LMARGIN", new_y="NEXT")
 
-    # ── Overview ─────────────────────────────────────────────────────
+    # ── Dataset Overview ───────────────────────────────────────────────
     _section_title(pdf, "Dataset Overview")
-    overview_df = pd.DataFrame({
-        "Metric": ["Rows", "Columns", "Missing Values", "Duplicate Rows",
-                   "Numeric Columns", "Categorical Columns"],
-        "Value": [overview["rows"], overview["columns"], overview["missing_total"],
-                  overview["duplicate_rows"], len(numeric_cols), len(categorical_cols)],
-    })
-    _draw_table(pdf, overview_df, max_rows=10)
+    _paragraph(pdf, overview_text)
 
-    # ── Numeric summary statistics ───────────────────────────────────
+    # ── Quality Assessment ───────────────────────────────────────────────
+    _section_title(pdf, "Quality Assessment")
+    _paragraph(pdf, quality_text)
+
+    # ── Descriptive Statistics ───────────────────────────────────────────
     if numeric_cols:
-        summary_df = build_numeric_summary_table(df, numeric_cols)
-        if summary_df is not None:
-            _section_title(pdf, "Numeric Summary Statistics")
-            _draw_table(pdf, summary_df, max_rows=10)
+        stats_df = build_descriptive_stats_table(df, numeric_cols)
+        if stats_df is not None:
+            _section_title(pdf, "Descriptive Statistics")
+            _draw_table(pdf, stats_df, max_rows=12)
 
-    # ── Correlation heatmap ───────────────────────────────────────────
-    if len(numeric_cols) > 1:
-        fig = build_correlation_heatmap(df, numeric_cols)
-        if fig is not None:
-            _section_title(pdf, "Correlation Analysis")
+    # ── Distributions ───────────────────────────────────────────────────
+    if numeric_cols:
+        _section_title(pdf, "Distributions")
+        for col in numeric_cols[:8]:
+            fig = build_numeric_distribution(df, col)
             _chart_or_note(fig)
 
-    # ── Top-10 category breakdowns (up to 5 categorical columns) ─────
-    for col in categorical_cols[:5]:
+    # ── Correlation Analysis ─────────────────────────────────────────────
+    if len(numeric_cols) > 1:
+        _section_title(pdf, "Correlation Analysis")
+        heat_fig = build_correlation_heatmap(df, numeric_cols)
+        if heat_fig is not None:
+            _chart_or_note(heat_fig)
+
+        if facts["top_corr_pair"]:
+            c1, c2, r = facts["top_corr_pair"]
+            scatter_fig, r2 = build_scatter_regression(df, c1, c2)
+            if scatter_fig is not None:
+                _paragraph(
+                    pdf,
+                    f"{_label(c1)} and {_label(c2)} show the strongest relationship in the "
+                    f"dataset (correlation r = {r}). The scatter plot below fits a trend line "
+                    f"(R2 = {r2}).",
+                )
+                _chart_or_note(scatter_fig)
+
+    # ── Category Breakdown (up to 4 categorical columns) ─────────────────
+    for col in categorical_cols[:4]:
         try:
             counts, fig = build_top_categories(df, col)
         except Exception:
             continue
         if counts is None or counts.empty:
             continue
-        _section_title(pdf, f"Top 10 - {col.replace('_', ' ').title()}")
+        _section_title(pdf, f"Top 10 - {_label(col)}")
+        leaders = facts["category_leaders"].get(col)
+        if leaders:
+            lead_text = f'The most common {_label(col)} is "{leaders[0][0]}" ({leaders[0][1]:,} records)'
+            if len(leaders) > 1:
+                lead_text += f', followed by "{leaders[1][0]}" ({leaders[1][1]:,}).'
+            else:
+                lead_text += "."
+            _paragraph(pdf, lead_text)
         _draw_table(pdf, counts, max_rows=10)
         _chart_or_note(fig)
 
-    # ── Numeric distributions (up to 5 numeric columns) ───────────────
-    for col in numeric_cols[:5]:
-        fig = build_numeric_distribution(df, col)
-        _section_title(pdf, f"Distribution - {col.replace('_', ' ').title()}")
-        _chart_or_note(fig)
+    # ── Average <numeric> by <category> ──────────────────────────────────
+    if numeric_cols and categorical_cols:
+        num_col, cat_col = numeric_cols[0], categorical_cols[0]
+        if df[cat_col].nunique() <= 40:
+            _section_title(pdf, f"Average {_label(num_col)} by {_label(cat_col)}")
+            _chart_or_note(build_avg_by_category(df, cat_col, num_col))
+
+    # ── Outlier Detection (boxplots, up to 4 numeric columns) ────────────
+    if numeric_cols:
+        _section_title(pdf, "Outlier Detection")
+        for col in numeric_cols[:4]:
+            _chart_or_note(build_boxplot(df, col))
+
+    # ── Key Findings ───────────────────────────────────────────────────
+    if key_findings:
+        _section_title(pdf, "Key Findings")
+        _draw_bullets(pdf, key_findings)
+
+    # ── Summary ──────────────────────────────────────────────────────────
+    _section_title(pdf, "Summary")
+    _paragraph(pdf, summary_text)
 
     pdf_bytes = bytes(pdf.output())
 

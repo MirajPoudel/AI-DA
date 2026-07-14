@@ -151,6 +151,19 @@ with st.sidebar:
                 st.session_state.session_title = None
                 st.session_state.pdf_bytes = None
                 st.success(f"Connected to {provider} / {model}!")
+
+                # Upgrade the already-generated full analysis PDF with an
+                # AI-written narrative now that a key is available.
+                if st.session_state.df is not None:
+                    with st.spinner("Enhancing dataset analysis PDF with AI narrative..."):
+                        try:
+                            st.session_state.full_analysis_pdf = generate_full_analysis_pdf(
+                                st.session_state.df,
+                                st.session_state.full_analysis_name or "dataset",
+                                llm=llm,
+                            )
+                        except Exception:
+                            pass  # keep the already-generated template-based PDF
             except Exception as e:
                 st.error(f"Failed to initialise LLM: {e}")
 
@@ -174,7 +187,7 @@ with st.sidebar:
             with st.spinner("Generating full dataset analysis PDF..."):
                 try:
                     st.session_state.full_analysis_pdf = generate_full_analysis_pdf(
-                        st.session_state.df, uploaded.name
+                        st.session_state.df, uploaded.name, llm=st.session_state.llm
                     )
                     st.session_state.full_analysis_name = uploaded.name
                 except Exception as e:
