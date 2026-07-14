@@ -10,3 +10,16 @@ python-dotenv
 openpyxl
 fpdf2
 kaleido==0.2.1
+fpdf
+fpdf2
+kaleido==0.2.1
+langchain-google-genai
+langchain-groq
+langchain-openai
+langgraph
+numpy
+openpyxl
+pandas
+plotly
+python-dotenv
+streamlit
