@@ -18,10 +18,17 @@ Rules:
   - Never leave raw column names as axis titles or legend labels. Always pass a `labels={...}`
     dict to plotly express (e.g. `labels={"col_name": "Readable Label"}`) or set
     `fig.update_xaxes(title="...")` / `fig.update_yaxes(title="...")` with human-readable text.
+  - If the category axis would show long or numerous text values (e.g. full names, titles,
+    dates, sentences — anything long, not short codes like country abbreviations), do NOT spell
+    them out across the chart. Instead add a leading rank/position column (e.g. "#": 1, 2, 3...)
+    to `result`, plot that short column on the axis instead of the raw text, and pass the full
+    text via `hover_data={"original_col": True}` so it only appears in the table (`result`,
+    already shown to the user) and in hover tooltips — never crowding the chart itself.
   - Make charts visually polished: use color_discrete_sequence=px.colors.qualitative.Bold
     (categorical) or color_continuous_scale="Viridis" (continuous), set template="plotly_white",
     give it a clear, descriptive title, and apply fig.update_layout(font=dict(size=13),
-    legend_title_text="") so legends read cleanly.
+    legend_title_text="", showlegend=False if color already encodes the position column) so
+    legends read cleanly.
 - Do NOT read/write files, do NOT use exec/eval/os/sys/subprocess.
 - Output ONLY the Python code, no markdown fences, no explanation.
 """

@@ -348,7 +348,9 @@ def generate_full_analysis_pdf(df: pd.DataFrame, dataset_name: str = "Dataset", 
         num_col, cat_col = numeric_cols[0], categorical_cols[0]
         if df[cat_col].nunique() <= 40:
             _section_title(pdf, f"Average {_label(num_col)} by {_label(cat_col)}")
-            _chart_or_note(build_avg_by_category(df, cat_col, num_col))
+            avg_table, avg_fig = build_avg_by_category(df, cat_col, num_col)
+            _draw_table(pdf, avg_table, max_rows=15)
+            _chart_or_note(avg_fig)
 
     # ── Outlier Detection (boxplots, up to 4 numeric columns) ────────────
     if numeric_cols:

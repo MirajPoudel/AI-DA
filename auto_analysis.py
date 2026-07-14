@@ -107,18 +107,26 @@ def build_correlation_heatmap(df: pd.DataFrame, numeric_cols: list):
 
 
 def build_top_categories(df: pd.DataFrame, col: str, top_n: int = 10):
-    """Top-N most frequent values for a categorical column, as (table, chart)."""
+    """Top-N most frequent values for a categorical column, as (table, chart).
+
+    The chart axis uses short position labels ("1", "2", ...) instead of the
+    full category text — the actual values only appear in the accompanying
+    table (and in the hover tooltip), so long category names never clutter
+    the chart itself."""
     counts = df[col].astype(str).value_counts().head(top_n).reset_index()
     counts.columns = [col, "Count"]
+    counts.insert(0, "#", [str(i + 1) for i in range(len(counts))])
+
     label = _label(col)
     fig = px.bar(
-        counts, x=col, y="Count", color=col,
-        color_discrete_sequence=COLOR_SEQ,
-        title=f"Top {len(counts)} {label} by Count",
-        labels={col: label, "Count": "Number of Records"},
+        counts, x="#", y="Count",
+        color_discrete_sequence=[COLOR_SEQ[0]],
+        title=f"Top {len(counts)} {label} by Count (see table for names)",
+        labels={"#": label, "Count": "Number of Records"},
+        hover_data={col: True, "#": False},
     )
-    fig.update_layout(template=CHART_TEMPLATE, font=dict(size=13), showlegend=False,
-                       legend_title_text="")
+    fig.update_xaxes(type="category")
+    fig.update_layout(template=CHART_TEMPLATE, font=dict(size=13), showlegend=False)
     return counts, fig
 
 
@@ -164,23 +172,30 @@ def build_scatter_regression(df: pd.DataFrame, x_col: str, y_col: str):
 
 
 def build_avg_by_category(df: pd.DataFrame, cat_col: str, num_col: str, top_n: int = 15):
+    """Average of `num_col` per `cat_col`, as (table, chart). Like
+    `build_top_categories`, the chart uses short position labels and the
+    full category names live only in the returned table / hover tooltip."""
     grouped = (
         df.groupby(cat_col)[num_col]
         .mean()
+        .round(2)
         .sort_values(ascending=False)
         .head(top_n)
         .reset_index()
     )
+    grouped.insert(0, "#", [str(i + 1) for i in range(len(grouped))])
+
     label_cat, label_num = _label(cat_col), _label(num_col)
     fig = px.bar(
-        grouped, x=cat_col, y=num_col, color=cat_col,
-        color_discrete_sequence=COLOR_SEQ,
-        title=f"Average {label_num} by {label_cat}",
-        labels={cat_col: label_cat, num_col: f"Average {label_num}"},
+        grouped, x="#", y=num_col,
+        color_discrete_sequence=[COLOR_SEQ[3]],
+        title=f"Average {label_num} by {label_cat} (see table for names)",
+        labels={"#": label_cat, num_col: f"Average {label_num}"},
+        hover_data={cat_col: True, "#": False},
     )
-    fig.update_layout(template=CHART_TEMPLATE, font=dict(size=13), showlegend=False,
-                       legend_title_text="")
-    return fig
+    fig.update_xaxes(type="category")
+    fig.update_layout(template=CHART_TEMPLATE, font=dict(size=13), showlegend=False)
+    return grouped, fig
 
 
 def build_boxplot(df: pd.DataFrame, col: str):
