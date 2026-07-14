@@ -19,7 +19,8 @@ class GraphState(TypedDict):
     result: Optional[Any]
     fig: Optional[Any]
     error: Optional[str]
-    insight: Optional[str]
+    answer: Optional[str]
+    description: Optional[str]
 
 
 def profile_node(state: GraphState) -> GraphState:
@@ -47,9 +48,12 @@ def execute_node(state: GraphState) -> GraphState:
 
 def insight_node(state: GraphState) -> GraphState:
     if state["error"]:
-        state["insight"] = f"Execution failed: {state['error']}"
+        state["answer"] = "Execution failed."
+        state["description"] = state["error"]
     else:
-        state["insight"] = generate_insight(state["user_query"], state["result"], state["llm"])
+        insight = generate_insight(state["user_query"], state["result"], state["llm"])
+        state["answer"] = insight["answer"]
+        state["description"] = insight["description"]
     return state
 
 

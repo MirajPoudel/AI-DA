@@ -1,4 +1,6 @@
+import os
 import streamlit as st
+import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -21,7 +23,7 @@ def _is_quota_error(exc: Exception) -> bool:
         exc = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
     return False
 from graph import build_graph
-from pdf_export import generate_pdf
+from pdf_export import generate_pdf, generate_full_analysis_pdf
 from sessions import (
     list_sessions, save_session, load_session,
     delete_session, new_session_id, make_title,
@@ -59,6 +61,12 @@ if "active_api_key" not in st.session_state:
     st.session_state.active_api_key = None
 if "active_model" not in st.session_state:
     st.session_state.active_model = None
+if "full_analysis_pdf" not in st.session_state:
+    st.session_state.full_analysis_pdf = None
+if "full_analysis_name" not in st.session_state:
+    st.session_state.full_analysis_name = None
+if "last_uploaded_sig" not in st.session_state:
+    st.session_state.last_uploaded_sig = None
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -158,12 +166,33 @@ with st.sidebar:
         type=["csv", "xlsx", "xls", "json", "db"],
     )
     if uploaded:
-        st.session_state.df = load_dataset(uploaded)
-        st.success(f"Loaded: {uploaded.name}")
+        file_sig = (uploaded.name, uploaded.size)
+        if st.session_state.last_uploaded_sig != file_sig:
+            st.session_state.df = load_dataset(uploaded)
+            st.session_state.last_uploaded_sig = file_sig
+            st.success(f"Loaded: {uploaded.name}")
+            with st.spinner("Generating full dataset analysis PDF..."):
+                try:
+                    st.session_state.full_analysis_pdf = generate_full_analysis_pdf(
+                        st.session_state.df, uploaded.name
+                    )
+                    st.session_state.full_analysis_name = uploaded.name
+                except Exception as e:
+                    st.session_state.full_analysis_pdf = None
+                    st.warning(f"Could not auto-generate the full analysis PDF: {e}")
 
     if st.session_state.df is not None:
         st.write(f"Rows: {st.session_state.df.shape[0]}, "
                  f"Cols: {st.session_state.df.shape[1]}")
+        if st.session_state.full_analysis_pdf:
+            base_name = os.path.splitext(st.session_state.full_analysis_name or "dataset")[0]
+            st.download_button(
+                label="📊 Download Full Dataset Analysis (PDF)",
+                data=st.session_state.full_analysis_pdf,
+                file_name=f"{base_name}_full_analysis.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
 
     st.divider()
 
@@ -214,9 +243,20 @@ else:
         with st.chat_message("user"):
             st.write(entry["query"])
         with st.chat_message("assistant"):
-            st.write(entry["insight"])
-            if entry.get("result") is not None:
-                st.write(entry["result"])
+            answer = entry.get("answer") or entry.get("insight", "")
+            description = entry.get("description", "")
+            if answer:
+                st.markdown(f"**{answer}**")
+            if description:
+                st.write(description)
+
+            result = entry.get("result")
+            if isinstance(result, pd.DataFrame) and not result.empty:
+                st.markdown("**📊 Comparison Table (Top 10)**")
+                st.dataframe(result.head(10), use_container_width=True)
+            elif result is not None:
+                st.write(result)
+
             if entry.get("fig") is not None:
                 st.plotly_chart(entry["fig"], use_container_width=True)
 
@@ -326,11 +366,12 @@ else:
                 st.stop()
 
         entry = {
-            "query":   query,
-            "insight": result_state["insight"],
-            "result":  result_state["result"],
-            "fig":     result_state["fig"],
-            "code":    result_state["code"],
+            "query":       query,
+            "answer":      result_state["answer"],
+            "description": result_state["description"],
+            "result":      result_state["result"],
+            "fig":         result_state["fig"],
+            "code":        result_state["code"],
         }
         st.session_state.history.append(entry)
 

@@ -4,6 +4,7 @@ Plotly figures are serialised with fig.to_json() / pio.from_json().
 Pandas DataFrames are serialised with df.to_json() / pd.read_json().
 """
 
+import io
 import json
 import os
 import uuid
@@ -30,18 +31,19 @@ def _deserialise_result(blob):
     if t == "none":
         return None
     if t == "dataframe":
-        return pd.read_json(blob["data"], orient="split")
+        return pd.read_json(io.StringIO(blob["data"]), orient="split")
     return blob.get("data")
 
 
 def _serialise_entry(entry: dict) -> dict:
     fig = entry.get("fig")
     return {
-        "query":   entry.get("query", ""),
-        "insight": entry.get("insight", ""),
-        "code":    entry.get("code", ""),
-        "result":  _serialise_result(entry.get("result")),
-        "fig":     fig.to_json() if fig is not None else None,
+        "query":       entry.get("query", ""),
+        "answer":      entry.get("answer", entry.get("insight", "")),
+        "description": entry.get("description", ""),
+        "code":        entry.get("code", ""),
+        "result":      _serialise_result(entry.get("result")),
+        "fig":         fig.to_json() if fig is not None else None,
     }
 
 
@@ -49,11 +51,12 @@ def _deserialise_entry(raw: dict) -> dict:
     fig_json = raw.get("fig")
     fig = pio.from_json(fig_json) if fig_json else None
     return {
-        "query":   raw.get("query", ""),
-        "insight": raw.get("insight", ""),
-        "code":    raw.get("code", ""),
-        "result":  _deserialise_result(raw.get("result", {"type": "none"})),
-        "fig":     fig,
+        "query":       raw.get("query", ""),
+        "answer":      raw.get("answer", raw.get("insight", "")),
+        "description": raw.get("description", ""),
+        "code":        raw.get("code", ""),
+        "result":      _deserialise_result(raw.get("result", {"type": "none"})),
+        "fig":         fig,
     }
 
 

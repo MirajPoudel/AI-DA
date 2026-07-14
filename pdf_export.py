@@ -3,6 +3,14 @@ import os
 from fpdf import FPDF
 import pandas as pd
 
+from auto_analysis import (
+    build_overview_stats,
+    build_numeric_summary_table,
+    build_correlation_heatmap,
+    build_top_categories,
+    build_numeric_distribution,
+)
+
 
 class AnalysisPDF(FPDF):
     def header(self):
@@ -35,7 +43,30 @@ def _split_insight(insight: str):
     return insight.strip(), ""
 
 
-def _draw_table(pdf: FPDF, df: pd.DataFrame, max_rows: int = 12):
+def _section_title(pdf: FPDF, text: str):
+    if pdf.get_y() > 250:
+        pdf.add_page()
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_fill_color(50, 90, 180)
+    pdf.cell(0, 9, f"  {text}", fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+
+
+def _add_chart_image(pdf: FPDF, fig, tmp_files: list, width: float = 188):
+    img_bytes = fig.to_image(format="png", width=1000, height=520, scale=1.5)
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+    tmp.write(img_bytes)
+    tmp.close()
+    tmp_files.append(tmp.name)
+
+    if pdf.get_y() > 210:
+        pdf.add_page()
+    pdf.image(tmp.name, x=10, w=width)
+    pdf.ln(4)
+
+
+def _draw_table(pdf: FPDF, df: pd.DataFrame, max_rows: int = 10):
     """Draw a bordered, styled table for a DataFrame."""
     df = df.head(max_rows)
     cols = list(df.columns)
@@ -101,9 +132,12 @@ def generate_pdf(history: list, dataset_name: str = "Dataset") -> bytes:
         pdf.cell(0, 9, f"  Q{i}: {entry['query']}", fill=True, new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
-        # ── Direct answer (first sentence, bold & large) ─────────────
-        insight = entry.get("insight") or ""
-        direct_answer, description = _split_insight(insight)
+        # ── Direct answer + description (structured, falls back to old
+        # single-"insight" sessions by heuristically splitting the text) ──
+        direct_answer = (entry.get("answer") or "").strip()
+        description = (entry.get("description") or "").strip()
+        if not direct_answer and not description:
+            direct_answer, description = _split_insight(entry.get("insight") or "")
 
         if direct_answer:
             pdf.set_font("Helvetica", "B", 13)
@@ -123,9 +157,9 @@ def generate_pdf(history: list, dataset_name: str = "Dataset") -> bytes:
         if isinstance(result, pd.DataFrame) and not result.empty:
             pdf.set_font("Helvetica", "B", 10)
             pdf.set_text_color(50, 90, 180)
-            pdf.cell(0, 7, "Comparison Table", new_x="LMARGIN", new_y="NEXT")
+            pdf.cell(0, 7, "Comparison Table (Top 10)", new_x="LMARGIN", new_y="NEXT")
             pdf.ln(1)
-            _draw_table(pdf, result)
+            _draw_table(pdf, result, max_rows=10)
         elif result is not None:
             result_str = str(result).strip()
             if result_str:
@@ -167,6 +201,85 @@ def generate_pdf(history: list, dataset_name: str = "Dataset") -> bytes:
         pdf.line(10, pdf.get_y(), 200, pdf.get_y())
         pdf.set_line_width(0.2)
         pdf.ln(6)
+
+    pdf_bytes = bytes(pdf.output())
+
+    for f in tmp_files:
+        try:
+            os.unlink(f)
+        except Exception:
+            pass
+
+    return pdf_bytes
+
+
+def generate_full_analysis_pdf(df: pd.DataFrame, dataset_name: str = "Dataset") -> bytes:
+    """Generate a full, automatic dataset analysis report (no LLM/chat needed):
+    overview stats, numeric summary statistics, correlations, top-10 category
+    breakdowns, and numeric distributions — all with nicely labeled charts."""
+    pdf = AnalysisPDF()
+    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.add_page()
+
+    pdf.set_font("Helvetica", "I", 9)
+    pdf.set_text_color(130, 130, 130)
+    pdf.cell(0, 6, f"Source: {dataset_name}  |  Full Dataset Analysis", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    tmp_files = []
+    overview = build_overview_stats(df)
+    numeric_cols = overview["numeric_columns"]
+    categorical_cols = overview["categorical_columns"]
+
+    def _chart_or_note(fig):
+        try:
+            _add_chart_image(pdf, fig, tmp_files)
+        except Exception as e:
+            pdf.set_font("Helvetica", "I", 9)
+            pdf.set_text_color(180, 60, 60)
+            pdf.cell(0, 6, f"[Chart could not be rendered: {e}]", new_x="LMARGIN", new_y="NEXT")
+
+    # ── Overview ─────────────────────────────────────────────────────
+    _section_title(pdf, "Dataset Overview")
+    overview_df = pd.DataFrame({
+        "Metric": ["Rows", "Columns", "Missing Values", "Duplicate Rows",
+                   "Numeric Columns", "Categorical Columns"],
+        "Value": [overview["rows"], overview["columns"], overview["missing_total"],
+                  overview["duplicate_rows"], len(numeric_cols), len(categorical_cols)],
+    })
+    _draw_table(pdf, overview_df, max_rows=10)
+
+    # ── Numeric summary statistics ───────────────────────────────────
+    if numeric_cols:
+        summary_df = build_numeric_summary_table(df, numeric_cols)
+        if summary_df is not None:
+            _section_title(pdf, "Numeric Summary Statistics")
+            _draw_table(pdf, summary_df, max_rows=10)
+
+    # ── Correlation heatmap ───────────────────────────────────────────
+    if len(numeric_cols) > 1:
+        fig = build_correlation_heatmap(df, numeric_cols)
+        if fig is not None:
+            _section_title(pdf, "Correlation Analysis")
+            _chart_or_note(fig)
+
+    # ── Top-10 category breakdowns (up to 5 categorical columns) ─────
+    for col in categorical_cols[:5]:
+        try:
+            counts, fig = build_top_categories(df, col)
+        except Exception:
+            continue
+        if counts is None or counts.empty:
+            continue
+        _section_title(pdf, f"Top 10 - {col.replace('_', ' ').title()}")
+        _draw_table(pdf, counts, max_rows=10)
+        _chart_or_note(fig)
+
+    # ── Numeric distributions (up to 5 numeric columns) ───────────────
+    for col in numeric_cols[:5]:
+        fig = build_numeric_distribution(df, col)
+        _section_title(pdf, f"Distribution - {col.replace('_', ' ').title()}")
+        _chart_or_note(fig)
 
     pdf_bytes = bytes(pdf.output())
 

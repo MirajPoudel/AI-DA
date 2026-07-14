@@ -24,6 +24,18 @@ def extract_text(response) -> str:
     return str(content).strip()
 
 
+def split_answer_description(text: str) -> tuple[str, str]:
+    """Fallback split of a plain-text insight into a short direct answer and a
+    longer description, used when structured JSON parsing fails."""
+    if not text:
+        return "", ""
+    for sep in (". ", ".\n", "\n\n"):
+        idx = text.find(sep)
+        if idx != -1 and idx < 200:
+            return text[: idx + 1].strip(), text[idx + len(sep):].strip()
+    return text.strip(), ""
+
+
 class QuotaExhaustedError(Exception):
     """Raised when the daily/project quota is permanently exhausted."""
     pass
